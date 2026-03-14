@@ -1,0 +1,18 @@
+{
+  "activeUser": "",
+  "album": "",
+  "artist": "",
+  "artworkPath": "",
+  "artworkUrl": "",
+  "connectionState": "disconnected",
+  "deviceName": "",
+  "durationMs": 0,
+  "error": "",
+  "lastUpdated": "2026-03-14T21:22:08+00:00",
+  "playbackStatus": "stopped",
+  "positionMs": 0,
+  "sessionName": "",
+  "sourceType": "idle",
+  "title": "",
+  "volumePercent": -1
+}
