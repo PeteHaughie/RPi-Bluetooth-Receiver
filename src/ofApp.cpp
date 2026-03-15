@@ -92,10 +92,6 @@ void ofApp::keyPressed(int key){
     if (key == 'r' || key == 'R') {
         loadStateIfChanged(true);
     }
-
-    if (key == 'f' || key == 'F') {
-        ofToggleFullscreen();
-    }
 }
 
 void ofApp::windowResized(int w, int h){
@@ -219,7 +215,6 @@ void ofApp::drawMetadataPanel(const ofRectangle& bounds) {
         drawScaledBitmapText(wrapText("Bridge: " + state.errorMessage, 40), left, bounds.getBottom() - 90.0f, 1.8f, ofColor(24, 29, 38, 0), ofColor(255, 153, 153));
     }
 
-    drawScaledBitmapText("R reloads state   F toggles fullscreen", left, bounds.getBottom() - 34.0f, 1.3f, ofColor(24, 29, 38, 0), ofColor(143, 153, 166));
     ofPopStyle();
 }
 
