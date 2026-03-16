@@ -3,9 +3,29 @@
 #include <filesystem>
 #include <sstream>
 
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 namespace {
 constexpr std::uint64_t kStatePollIntervalMs = 500;
 constexpr float kArtworkPanelWidthRatio = 0.42f;
+
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+constexpr const char* kStartupTracePath = "/tmp/rpi-bluetooth-receiver-ui.log";
+
+void appendRuntimeTrace(const std::string& message) {
+    const int fd = ::open(kStartupTracePath, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0) {
+        return;
+    }
+
+    const std::string line = message + "\n";
+    static_cast<void>(::write(fd, line.c_str(), line.size()));
+    ::close(fd);
+}
+#endif
 
 ofColor statusColorForState(const ReceiverState& state) {
     if (!state.errorMessage.empty()) {
@@ -46,9 +66,20 @@ std::string chooseTrackTitle(const ReceiverState& state) {
 
     return "No track playing";
 }
+
+void drawPanelBackground(const ofRectangle& bounds, float cornerRadius) {
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    ofDrawRectangle(bounds);
+#else
+    ofDrawRectRounded(bounds, cornerRadius);
+#endif
+}
 } // namespace
 
 void ofApp::setup(){
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    appendRuntimeTrace("ofApp::setup begin");
+#endif
     ofSetWindowTitle("Receiver Display");
     ofSetFrameRate(30);
     ofBackground(10, 14, 20);
@@ -57,9 +88,20 @@ void ofApp::setup(){
     stateFilePath = ofToDataPath("receiver_state.json", true);
     dataDirectory = ofFilePath::getEnclosingDirectory(stateFilePath, true);
     loadStateIfChanged(true);
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    appendRuntimeTrace("ofApp::setup complete");
+#endif
 }
 
 void ofApp::update(){
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    static bool loggedFirstUpdate = false;
+    if (!loggedFirstUpdate) {
+        appendRuntimeTrace("ofApp::update first call");
+        loggedFirstUpdate = true;
+    }
+#endif
+
     const auto now = ofGetElapsedTimeMillis();
     if (now - lastPollMillis >= kStatePollIntervalMs) {
         loadStateIfChanged(false);
@@ -68,6 +110,14 @@ void ofApp::update(){
 }
 
 void ofApp::draw(){
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    static bool loggedFirstDraw = false;
+    const bool traceFirstDraw = !loggedFirstDraw;
+    if (traceFirstDraw) {
+        appendRuntimeTrace("ofApp::draw first frame begin");
+    }
+#endif
+
     ofBackgroundGradient(ofColor(12, 16, 24), ofColor(34, 40, 52), OF_GRADIENT_CIRCULAR);
 
     const float margin = 28.0f;
@@ -83,9 +133,33 @@ void ofApp::draw(){
                                      ofGetWidth() - artworkBounds.getWidth() - margin * 2.0f - gutter,
                                      contentHeight);
 
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    if (traceFirstDraw) {
+        appendRuntimeTrace("ofApp::draw status bar");
+    }
+#endif
     drawStatusBar(statusBounds);
+
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    if (traceFirstDraw) {
+        appendRuntimeTrace("ofApp::draw artwork panel");
+    }
+#endif
     drawArtworkPanel(artworkBounds);
+
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    if (traceFirstDraw) {
+        appendRuntimeTrace("ofApp::draw metadata panel");
+    }
+#endif
     drawMetadataPanel(metadataBounds);
+
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    if (traceFirstDraw) {
+        appendRuntimeTrace("ofApp::draw first frame complete");
+        loggedFirstDraw = true;
+    }
+#endif
 }
 
 void ofApp::keyPressed(int key){
@@ -100,8 +174,25 @@ void ofApp::windowResized(int w, int h){
 
 void ofApp::loadStateIfChanged(bool forceReload) {
     namespace fs = std::filesystem;
+    std::error_code error;
 
-    if (!fs::exists(stateFilePath)) {
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    if (forceReload) {
+        appendRuntimeTrace("ofApp::loadStateIfChanged forced reload");
+    }
+#endif
+
+    const bool stateFileExists = fs::exists(stateFilePath, error);
+    if (error) {
+        state = ReceiverState::disconnected();
+        state.errorMessage = "Unable to inspect receiver_state.json";
+        artworkImage.clear();
+        loadedArtworkPath.clear();
+        ofLogError() << "Unable to inspect state file at " << stateFilePath << ": " << error.message();
+        return;
+    }
+
+    if (!stateFileExists) {
         state = ReceiverState::disconnected();
         artworkImage.clear();
         loadedArtworkPath.clear();
@@ -109,7 +200,16 @@ void ofApp::loadStateIfChanged(bool forceReload) {
         return;
     }
 
-    const auto modifiedAt = fs::last_write_time(stateFilePath);
+    const auto modifiedAt = fs::last_write_time(stateFilePath, error);
+    if (error) {
+        state = ReceiverState::disconnected();
+        state.errorMessage = "Unable to read state file timestamp";
+        artworkImage.clear();
+        loadedArtworkPath.clear();
+        ofLogError() << "Unable to read state file timestamp for " << stateFilePath << ": " << error.message();
+        return;
+    }
+
     if (!forceReload && hasStateTimestamp && modifiedAt == lastStateTimestamp) {
         return;
     }
@@ -161,7 +261,7 @@ void ofApp::loadArtworkIfNeeded() {
 void ofApp::drawArtworkPanel(const ofRectangle& bounds) {
     ofPushStyle();
     ofSetColor(24, 29, 38, 220);
-    ofDrawRectRounded(bounds, 18.0f);
+    drawPanelBackground(bounds, 18.0f);
 
     if (artworkImage.isAllocated()) {
         const float imageSize = std::min(bounds.getWidth() - 24.0f, bounds.getHeight() - 24.0f);
@@ -170,7 +270,7 @@ void ofApp::drawArtworkPanel(const ofRectangle& bounds) {
         artworkImage.draw(x, y, imageSize, imageSize);
     } else {
         ofSetColor(46, 54, 68);
-        ofDrawRectRounded(bounds.x + 24.0f, bounds.y + 24.0f, bounds.getWidth() - 48.0f, bounds.getHeight() - 48.0f, 16.0f);
+        drawPanelBackground(ofRectangle(bounds.x + 24.0f, bounds.y + 24.0f, bounds.getWidth() - 48.0f, bounds.getHeight() - 48.0f), 16.0f);
         ofSetColor(204, 214, 246);
         ofNoFill();
         ofSetLineWidth(5.0f);
@@ -187,7 +287,7 @@ void ofApp::drawArtworkPanel(const ofRectangle& bounds) {
 void ofApp::drawMetadataPanel(const ofRectangle& bounds) {
     ofPushStyle();
     ofSetColor(24, 29, 38, 220);
-    ofDrawRectRounded(bounds, 18.0f);
+    drawPanelBackground(bounds, 18.0f);
 
     const float left = bounds.x + 28.0f;
     float cursorY = bounds.y + 42.0f;
@@ -221,19 +321,31 @@ void ofApp::drawMetadataPanel(const ofRectangle& bounds) {
 void ofApp::drawStatusBar(const ofRectangle& bounds) {
     ofPushStyle();
     ofSetColor(24, 29, 38, 210);
-    ofDrawRectRounded(bounds, 18.0f);
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    appendRuntimeTrace("drawStatusBar: background");
+#endif
+    drawPanelBackground(bounds, 18.0f);
 
     const ofColor indicatorColor = statusColorForState(state);
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    appendRuntimeTrace("drawStatusBar: indicator");
+#endif
     ofSetColor(indicatorColor);
     ofDrawCircle(bounds.x + 28.0f, bounds.getCenter().y, 10.0f);
 
     const std::string headline = state.sourceLabel() + " · " + state.connectionLabel();
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    appendRuntimeTrace("drawStatusBar: headline text");
+#endif
     drawScaledBitmapText(headline, bounds.x + 52.0f, bounds.y + 28.0f, 2.2f, ofColor(24, 29, 38, 0), ofColor(255));
 
     std::string subline = state.errorMessage.empty() ? "Bridge healthy" : state.errorMessage;
     if (!state.isConnected() && state.errorMessage.empty()) {
         subline = "Waiting for a Bluetooth or AirPlay session";
     }
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    appendRuntimeTrace("drawStatusBar: subline text");
+#endif
     drawScaledBitmapText(wrapText(subline, 56), bounds.x + 52.0f, bounds.y + 54.0f, 1.4f, ofColor(24, 29, 38, 0), ofColor(188, 196, 208));
     ofPopStyle();
 }
@@ -242,7 +354,16 @@ void ofApp::drawScaledBitmapText(const std::string& text, float x, float y, floa
     ofPushMatrix();
     ofTranslate(x, y);
     ofScale(scale, scale);
+
+#if defined(TARGET_LINUX) || defined(TARGET_RASPBERRY_PI)
+    ofPushStyle();
+    ofSetColor(foreground);
+    ofDrawBitmapString(text, 0.0f, 0.0f);
+    ofPopStyle();
+#else
     ofDrawBitmapStringHighlight(text, 0.0f, 0.0f, background, foreground);
+#endif
+
     ofPopMatrix();
 }
 
